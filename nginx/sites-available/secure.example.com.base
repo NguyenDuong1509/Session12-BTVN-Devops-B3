@@ -1,0 +1,16 @@
+# ==============================================================================
+# FILE CẤU HÌNH CƠ SỞ (CHƯA CÓ SECURITY HEADERS): secure.example.com.base
+# Đây là cấu hình gốc từ đề bài - Chưa được bảo vệ khỏi Clickjacking, MIME-Sniffing
+# ==============================================================================
+
+server {
+    listen 443 ssl;
+    server_name secure.example.com;
+
+    ssl_certificate /etc/nginx/ssl/server.crt;
+    ssl_certificate_key /etc/nginx/ssl/server.key;
+
+    location / {
+        proxy_pass http://localhost:8080;
+    }
+}

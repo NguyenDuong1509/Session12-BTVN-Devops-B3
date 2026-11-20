@@ -1,0 +1,106 @@
+================================================================================
+SESSION 12 - BÀI TẬP 3: CẤU HÌNH HEADER SECURITY (BẢO VỆ XSS, CLICKJACKING, MIME-SNIFFING)
+================================================================================
+
+--------------------------------------------------------------------------------
+1. GIẢI THÍCH 3 SECURITY HEADER BẮT BUỘC CỦA ĐỀ BÀI
+--------------------------------------------------------------------------------
+
+a) X-Frame-Options: SAMEORIGIN
+   - Chống tấn công Clickjacking: Kẻ tấn công nhúng trang web của bạn vào một iframe ẩn
+     trên trang độc hại, lừa người dùng vô tình click vào nút nguy hiểm (ví dụ: "Xác nhận chuyển tiền").
+   - Giá trị SAMEORIGIN: Chỉ cho phép trang web được nhúng vào iframe khi cùng chung một domain.
+   - Giá trị DENY: Cấm hoàn toàn nhúng vào iframe từ bất kỳ domain nào (bảo mật cao nhất).
+
+b) X-Content-Type-Options: nosniff
+   - Chống tấn công MIME-Sniffing: Trình duyệt cũ (đặc biệt IE) có thể cố tình "đoán" lại
+     Content-Type của file dựa vào nội dung file (MIME-sniffing), bỏ qua header Content-Type.
+   - Ví dụ nguy hiểm: Kẻ tấn công upload file "image.jpg" nhưng thực chất là mã JavaScript.
+     Trình duyệt MIME-sniff thấy script tag trong file, tự chạy dưới dạng JavaScript -> XSS!
+   - Header nosniff: Yêu cầu trình duyệt tuyệt đối tin tưởng Content-Type của server,
+     không tự đoán lại -> Loại bỏ hoàn toàn vector tấn công này.
+
+c) Strict-Transport-Security: max-age=31536000; includeSubDomains
+   - HSTS (HTTP Strict Transport Security): Yêu cầu trình duyệt chỉ giao tiếp với tên miền
+     này qua HTTPS trong vòng 31536000 giây (1 năm) kể từ lần cuối thấy header này.
+   - Chống SSL Stripping Attack: Kẻ tấn công ngăn chặn kết nối HTTPS, ép client dùng HTTP
+     để nghe lén dữ liệu (Man-in-the-Middle). HSTS làm cho trình duyệt tự động reject kết nối HTTP.
+   - includeSubDomains: Áp dụng bảo vệ HSTS cho cả tất cả subdomain (api., admin., ...).
+
+
+--------------------------------------------------------------------------------
+2. CẤU HÌNH CƠ SỞ (TỪ ĐỀ BÀI)
+--------------------------------------------------------------------------------
+server {
+    listen 443 ssl;
+    server_name secure.example.com;
+
+    ssl_certificate /etc/nginx/ssl/server.crt;
+    ssl_certificate_key /etc/nginx/ssl/server.key;
+
+    location / {
+        proxy_pass http://localhost:8080;
+    }
+}
+
+
+--------------------------------------------------------------------------------
+3. CẤU HÌNH ĐÃ BỔ SUNG ĐẦY ĐỦ SECURITY HEADERS (ĐÁP ÁN CHUẨN)
+--------------------------------------------------------------------------------
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name secure.example.com;
+
+    ssl_certificate /etc/nginx/ssl/server.crt;
+    ssl_certificate_key /etc/nginx/ssl/server.key;
+
+    # --- 3 SECURITY HEADERS BẮT BUỘC THEO YÊU CẦU ĐỀ BÀI ---
+
+    # Chống Clickjacking: Chỉ cho phép nhúng iframe từ cùng domain
+    add_header X-Frame-Options "SAMEORIGIN" always;
+
+    # Chống MIME-Sniffing: Trình duyệt phải tuân thủ Content-Type của server
+    add_header X-Content-Type-Options "nosniff" always;
+
+    # HSTS: Ép trình duyệt dùng HTTPS trong 1 năm, áp dụng cho tất cả subdomain
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    # --- SECURITY HEADERS BỔ SUNG (KHUYẾN NGHỊ THỰC TẾ) ---
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:;" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+
+    location / {
+        proxy_pass http://localhost:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# HTTP -> HTTPS Redirect
+server {
+    listen 80;
+    server_name secure.example.com;
+    return 301 https://$host$request_uri;
+}
+
+
+--------------------------------------------------------------------------------
+4. LỆNH KIỂM TRA SECURITY HEADERS BẰNG CURL -I (YÊU CẦU 4 KẾT QUẢ MONG MUỐN)
+--------------------------------------------------------------------------------
+# Kiểm tra tất cả response headers từ máy chủ:
+curl -I https://secure.example.com/
+
+# Kiểm tra cú pháp cấu hình Nginx:
+sudo nginx -t
+
+# Reload cấu hình an toàn:
+sudo nginx -t && sudo systemctl reload nginx
+
+# Lọc xem chỉ 3 security headers cụ thể:
+curl -I https://secure.example.com/ 2>/dev/null | grep -iE "X-Frame-Options|X-Content-Type-Options|Strict-Transport-Security"
